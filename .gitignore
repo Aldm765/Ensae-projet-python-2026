@@ -1,0 +1,16 @@
+# Secrets : ne jamais publier
+.env
+
+# Environnement virtuel
+.venv/
+
+# Données : stockées hors du dépôt (S3)
+data/
+*.csv
+*.parquet
+*.xlsx
+
+# Fichiers générés automatiquement par Python et Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
