@@ -1,0 +1,17 @@
+## 1. Caractérisation statistique et volatilité des grands marchés mondiaux
+
+### Données et méthodologie
+L'étude couvre la période du 1er janvier 2000 au 31 décembre 2025 pour trois grands indices boursiers représentatifs des principales zones horaires mondiales — le **S&P 500** (New York), le **CAC 40** (Paris) et le **Nikkei 225** (Tokyo) — ainsi que l'indice **VIX**, qui mesure la volatilité implicite à 30 jours anticipée sur les options du S&P 500.
+
+À partir des rendements logarithmiques journaliers $r_t = \ln(C_t / C_{t-1})$ et des cotations intrajournalières (ouverture, plus haut, plus bas, clôture), nous estimons la volatilité réalisée journalière à l'aide de deux estimateurs basés sur l'amplitude des prix :
+* **L'estimateur de Parkinson (1980)**, fondé sur l'écart extrême entre le plus haut ($H_t$) et le plus bas ($L_t$) de la séance :
+  $$\sigma_{\text{Parkinson}, t} = \sqrt{\frac{1}{4 \ln 2} \left(\ln \frac{H_t}{L_t}\right)^2}$$
+* **L'estimateur de Garman-Klass (1980)**, utilisé comme contrôle de robustesse en intégrant également l'écart entre ouverture et clôture :
+  $$\sigma_{\text{GK}, t} = \sqrt{0,5 \left(\ln \frac{H_t}{L_t}\right)^2 - (2 \ln 2 - 1) \left(\ln \frac{C_t}{O_t}\right)^2}$$
+
+### Faits stylisés des rendements et de la volatilité
+L'analyse descriptive met en évidence les propriétés classiques des séries financières :
+* **Queues épaisses (*leptokurticité*) et asymétrie négative :** tous les indices actions présentent une asymétrie (*skewness*) négative (entre $-0,22$ pour le CAC 40 et $-0,41$ pour le Nikkei) et un excès de kurtosis très élevé ($10,63$ pour le S&P 500, $7,24$ pour le Nikkei et $6,65$ pour le CAC 40), traduisant une fréquence des krachs extrêmes bien supérieure à celle d'une loi normale. Les pires séances atteignent $-12,77\%$ sur le S&P 500 (16 mars 2020), $-13,10\%$ sur le CAC 40 (12 mars 2020) et $-13,23\%$ sur le Nikkei (5 août 2024).
+* **Cohérence des estimateurs de volatilité :** la volatilité moyenne de Parkinson s'établit à $0,78\%$ par jour sur le S&P 500, $0,80\%$ sur le Nikkei et $0,89\%$ sur le CAC 40. Elle est très fortement corrélée à l'estimateur de Garman-Klass ($r > 0,93$ sur l'ensemble des indices), confirmant la robustesse de la mesure.
+* **Regroupement de la volatilité (*volatility clustering*) :** les épisodes de forte turbulence surviennent simultanément sur les trois places financières, notamment lors de la crise financière de 2008–2009 (volatilité lissée sur 20 jours dépassant $4\%$ et VIX au-dessus de 80) et du krach du Covid-19 en mars 2020 (volatilité supérieure à $3\%$ et VIX supérieur à 80). Le resserrement monétaire de 2022 génère une tension plus modérée mais persistante sur l'ensemble de l'année.
+* **Renforcement apparent des corrélations en crise :** la corrélation contemporaine entre le S&P 500 et le CAC 40 passe de $0,49$ avant crise (2000–2007) à $0,59$ en 2008–2009 et $0,75$ au printemps 2020, tandis que le VIX demeure fortement corrélé négativement au S&P 500 (jusqu'à $-0,86$ en 2008–2009). En revanche, la corrélation le même jour entre le S&P 500 et le Nikkei reste faible ($0,11$ à $0,37$) en raison du décalage horaire entre Tokyo et New York.
