@@ -62,7 +62,7 @@ Créer un fichier `.env` à la racine contenant votre clé FRED (gratuite sur
 fred.stlouisfed.org) :
 
 ```
-FRED_API_KEY=75d56d6af034945630cb8f49da46c3d5
+FRED_API_KEY=Votre clé 
 ```
 
 Puis exécuter `rapport.ipynb` de la première à la dernière cellule.
