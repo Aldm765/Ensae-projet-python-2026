@@ -4,10 +4,12 @@ from io import StringIO
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from matplotlib.lines import Line2D
+from scipy.stats import mannwhitneyu
 
 from src.commun import charger_prix, etude_evenement, volatilite_anormale
 
@@ -23,6 +25,9 @@ NOUVEL_HORAIRE = "2022-07-21"
 
 # Réunions hors calendrier, avec leur heure quand elle est documentée.
 URGENCES = {"2001-09-17": "15:30", "2008-10-08": None}
+
+# Décisions qui baissent le taux principal sans toucher au taux de dépôt.
+TAUX_PRINCIPAL_SEUL = ["2009-05-07", "2013-05-02", "2013-11-07"]
 
 # lendemain=True si le marché est déjà fermé à l'heure de la décision.
 # Paris est ouvert, New York ouvre à 15h30 (Paris), Tokyo a fermé le matin.
@@ -180,5 +185,47 @@ def figure(resultats=None):
     return fig
 
 
+def seances_reaction(vol, dates, lendemain):
+    """Renvoie la séance où le marché réagit à chaque date, sans doublon."""
+    cote = "right" if lendemain else "left"
+    position = vol.index.searchsorted(pd.DatetimeIndex(dates), side=cote)
+    return vol.index[np.unique(position)]
+
+
+def retirer_autres(vol, seances, autres):
+    """Retire de vol les autres décisions et leurs voisines, pour des témoins propres."""
+    position = vol.index.get_indexer(autres)
+    voisins = np.unique(np.concatenate([position - 1, position, position + 1]))
+    voisins = voisins[(voisins >= 0) & (voisins < len(vol))]
+    return vol.drop(vol.index[voisins].difference(seances))
+
+
+def controle_changement():
+    """Compare le jour 0 des décisions avec et sans changement de taux.
+
+    p_ecart teste directement la différence entre les deux groupes : un effet
+    significatif dans un groupe et pas dans l'autre ne suffit pas à la prouver.
+    """
+    annonces = charger_annonces()
+    a_change = (annonces["variation_taux"].ne(0)
+                | annonces["date"].isin(pd.to_datetime(TAUX_PRINCIPAL_SEUL)))
+
+    lignes = []
+    for marche, lendemain in MARCHES_BCE.items():
+        vol = volatilite_anormale(charger_prix(marche))
+        avec = seances_reaction(vol, annonces.loc[a_change, "date"], lendemain)
+        sans = seances_reaction(vol, annonces.loc[~a_change, "date"], lendemain).difference(avec)
+        p_ecart = mannwhitneyu(vol.loc[avec], vol.loc[sans]).pvalue
+
+        for groupe, seances, autres in [("avec changement", avec, sans),
+                                        ("sans changement", sans, avec)]:
+            effet = etude_evenement(retirer_autres(vol, seances, autres), seances)
+            jour_0 = effet[effet["jour"] == 0].iloc[0]
+            lignes.append({"banque": "BCE", "marche": marche, "groupe": groupe,
+                           "ratio": jour_0["ratio"], "p_value": jour_0["p_value"],
+                           "n": int(jour_0["n"]), "p_ecart": p_ecart})
+    return pd.DataFrame(lignes)
+
+
 if __name__ == "__main__":
-    print(analyse().query("jour == 0").to_string(index=False))
+    print(controle_changement().round(4).to_string(index=False))
