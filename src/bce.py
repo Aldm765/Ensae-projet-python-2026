@@ -3,9 +3,13 @@ import time
 from io import StringIO
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from matplotlib.lines import Line2D
+
+from src.commun import charger_prix, etude_evenement, volatilite_anormale
 
 URL_BCE = "https://www.ecb.europa.eu/press/govcdec/mopo/{annee}/html/index_include.en.html"
 URL_TAUX = "https://data-api.ecb.europa.eu/service/data/FM/B.U2.EUR.4F.KR.DFR.LEV"
@@ -19,6 +23,14 @@ NOUVEL_HORAIRE = "2022-07-21"
 
 # Réunions hors calendrier, avec leur heure quand elle est documentée.
 URGENCES = {"2001-09-17": "15:30", "2008-10-08": None}
+
+# lendemain=True si le marché est déjà fermé à l'heure de la décision.
+# Paris est ouvert, New York ouvre à 15h30 (Paris), Tokyo a fermé le matin.
+MARCHES_BCE = {"CAC40": False, "SP500": False, "NIKKEI": True}
+NOMS = {"CAC40": "CAC 40", "SP500": "S&P 500", "NIKKEI": "Nikkei (séance suivante)"}
+
+SEUIL = 0.05
+BLEU, GRIS, TEXTE = "#2a78d6", "#b5b4ad", "#52514e"
 
 
 def scraper_annee(annee):
@@ -107,5 +119,66 @@ def construire_annonces():
     return annonces
 
 
+def charger_annonces(telecharger=False):
+    """Lit le calendrier sauvegardé. Avec telecharger=True, refait le scraping.
+
+    Le rapport ne dépend ainsi pas de la disponibilité du site de la BCE.
+    """
+    if FICHIER_ANNONCES.exists() and not telecharger:
+        return pd.read_csv(FICHIER_ANNONCES, parse_dates=["date"])
+    return construire_annonces()
+
+
+def analyse():
+    """Renvoie l'effet des décisions : banque, marche, jour, ratio, p_value, n."""
+    dates = charger_annonces()["date"]
+
+    resultats = []
+    for marche, lendemain in MARCHES_BCE.items():
+        vol = volatilite_anormale(charger_prix(marche))
+        effet = etude_evenement(vol, dates, lendemain=lendemain)
+        resultats.append(effet.assign(banque="BCE", marche=marche))
+
+    colonnes = ["banque", "marche", "jour", "ratio", "p_value", "n"]
+    return pd.concat(resultats, ignore_index=True)[colonnes]
+
+
+def figure(resultats=None):
+    """Trace le ratio de volatilité de J-5 à J+5, un panneau par marché."""
+    if resultats is None:
+        resultats = analyse()
+
+    fig, axes = plt.subplots(1, len(MARCHES_BCE), figsize=(11, 4), sharey=True)
+    for ax, marche in zip(axes, MARCHES_BCE):
+        effet = resultats[resultats["marche"] == marche]
+        significatif = effet["p_value"] < SEUIL
+
+        ax.axhline(1, color=GRIS, linewidth=1)
+        ax.axvline(0, color=GRIS, linewidth=1, linestyle=":")
+        ax.plot(effet["jour"], effet["ratio"], color=BLEU, linewidth=2, zorder=2)
+        ax.scatter(effet.loc[significatif, "jour"], effet.loc[significatif, "ratio"],
+                   s=48, color=BLEU, edgecolor="white", linewidth=1.5, zorder=3)
+        ax.scatter(effet.loc[~significatif, "jour"], effet.loc[~significatif, "ratio"],
+                   s=42, facecolor="white", edgecolor=BLEU, linewidth=1.5, zorder=3)
+
+        ax.set_title(NOMS[marche], loc="left", fontsize=11, color=TEXTE)
+        ax.set_xlabel("Séances autour de la décision", color=TEXTE)
+        ax.set_xticks(range(-5, 6))
+        ax.yaxis.set_major_formatter(lambda valeur, _: f"{valeur:.2f}".replace(".", ","))
+        ax.tick_params(colors=TEXTE, length=0)
+        ax.spines[["top", "right", "left"]].set_visible(False)
+        ax.spines["bottom"].set_color(GRIS)
+
+    axes[0].set_ylabel("Volatilité / jours témoins", color=TEXTE)
+    fig.suptitle("Volatilité autour des décisions de la BCE, 2000-2025 (1,00 = aucun effet)",
+                 x=0.01, ha="left", fontsize=13)
+    legende = [Line2D([], [], marker="o", linestyle="", color=BLEU, label="p < 5 %"),
+               Line2D([], [], marker="o", linestyle="", markerfacecolor="white",
+                      markeredgecolor=BLEU, label="non significatif")]
+    fig.legend(handles=legende, loc="upper right", ncol=2, frameon=False)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    return fig
+
+
 if __name__ == "__main__":
-    print(construire_annonces())
+    print(analyse().query("jour == 0").to_string(index=False))
