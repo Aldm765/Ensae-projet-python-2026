@@ -227,5 +227,27 @@ def controle_changement():
     return pd.DataFrame(lignes)
 
 
+def controle_2002():
+    """Refait le jour 0 sans les réunions bimensuelles de 2000 et 2001.
+
+    Ces réunions restent exclues des jours témoins.
+    """
+    annonces = charger_annonces()
+    gardees = annonces.loc[annonces["date"].dt.year >= 2002, "date"]
+
+    lignes = []
+    for marche, lendemain in MARCHES_BCE.items():
+        vol = volatilite_anormale(charger_prix(marche))
+        seances = seances_reaction(vol, gardees, lendemain)
+        autres = seances_reaction(vol, annonces["date"], lendemain).difference(seances)
+        effet = etude_evenement(retirer_autres(vol, seances, autres), seances)
+        jour_0 = effet[effet["jour"] == 0].iloc[0]
+        lignes.append({"banque": "BCE", "marche": marche, "ratio": jour_0["ratio"],
+                       "p_value": jour_0["p_value"], "n": int(jour_0["n"])})
+    return pd.DataFrame(lignes)
+
+
 if __name__ == "__main__":
     print(controle_changement().round(4).to_string(index=False))
+    print()
+    print(controle_2002().round(4).to_string(index=False))
