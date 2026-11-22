@@ -247,7 +247,35 @@ def controle_2002():
     return pd.DataFrame(lignes)
 
 
+def volatilite_garman_klass(prix, fenetre=20):
+    """Même calcul que volatilite_anormale, avec la variance de Garman-Klass.
+
+    Cette mesure utilise aussi l'ouverture et la clôture, en plus de l'amplitude.
+    """
+    amplitude = np.log(prix["high"] / prix["low"])
+    rendement = np.log(prix["close"] / prix["open"])
+    variance = 0.5 * amplitude**2 - (2 * np.log(2) - 1) * rendement**2
+    log_vol = np.log(np.sqrt(variance.where(variance > 0)))
+    return (log_vol - log_vol.shift(1).rolling(fenetre, min_periods=15).mean()).dropna()
+
+
+def controle_garman_klass():
+    """Refait le jour 0 avec Garman-Klass à la place de Parkinson."""
+    dates = charger_annonces()["date"]
+
+    lignes = []
+    for marche, lendemain in MARCHES_BCE.items():
+        vol = volatilite_garman_klass(charger_prix(marche))
+        effet = etude_evenement(vol, dates, lendemain=lendemain)
+        jour_0 = effet[effet["jour"] == 0].iloc[0]
+        lignes.append({"banque": "BCE", "marche": marche, "ratio": jour_0["ratio"],
+                       "p_value": jour_0["p_value"], "n": int(jour_0["n"])})
+    return pd.DataFrame(lignes)
+
+
 if __name__ == "__main__":
     print(controle_changement().round(4).to_string(index=False))
     print()
     print(controle_2002().round(4).to_string(index=False))
+    print()
+    print(controle_garman_klass().round(4).to_string(index=False))
