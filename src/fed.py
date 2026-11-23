@@ -32,6 +32,8 @@ REACTION = {"SP500": False, "CAC40": True, "NIKKEI": True}
 
 UN_JOUR = pd.Timedelta(days=1)
 
+# FRED date l'urgence de mars 2020 à son entrée en vigueur (le 4) : l'annonce date du 3.
+DATES_ANNONCE = {pd.Timestamp("2020-03-04"): pd.Timestamp("2020-03-03")}
 
 # ---------- 1. Collecte des dates ----------
 
@@ -262,7 +264,7 @@ def construire_annonces():
             continue
         jour, var = resultat
         ligne = urgence.to_dict()
-        ligne["date"] = jour
+        ligne["date"] = DATES_ANNONCE.get(jour, jour)
         ligne["variation_taux"] = var
         lignes_urgences.append(ligne)
     urgences_gardees = pd.DataFrame(lignes_urgences)

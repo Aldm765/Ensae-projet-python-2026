@@ -165,7 +165,7 @@ date,banque,heure_paris,type,variation_taux
 2019-10-30,Fed,19:00,prevue,-0.25
 2019-12-11,Fed,20:00,prevue,0.0
 2020-01-29,Fed,20:00,prevue,0.0
-2020-03-04,Fed,,urgence,-0.5
+2020-03-03,Fed,,urgence,-0.5
 2020-03-16,Fed,,urgence,-1.0
 2020-04-29,Fed,20:00,prevue,0.0
 2020-06-10,Fed,20:00,prevue,0.0
