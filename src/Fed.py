@@ -10,6 +10,8 @@ from pathlib import Path
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+import os 
+from dotenv import find_dotenv, load_dotenv
 
 # Chemins et adresses
 RACINE = Path(__file__).resolve().parents[1]
@@ -183,3 +185,37 @@ def retirer_doublons(annonces, ecart_max=2):
 
 
 # ---------- 2. Taux directeur (API FRED) ----------
+
+def serie_fred(code, debut="1999-01-01", fin="2025-12-31"):
+    """Télécharge une série quotidienne de FRED. La clé est lue dans le fichier .env."""
+    load_dotenv(find_dotenv(usecwd=True))
+    cle = os.getenv("FRED_API_KEY")
+
+    parametres = {"series_id": code,
+                  "api_key": cle,
+                  "file_type": "json",
+                  "observation_start": debut,
+                  "observation_end": fin}
+    reponse = requests.get("https://api.stlouisfed.org/fred/series/observations",
+                           params=parametres, timeout=30)
+    reponse.raise_for_status()
+
+    observations = pd.DataFrame(reponse.json()["observations"])
+    # FRED écrit "." quand il n'y a pas de valeur : on transforme en case vide
+    valeurs = pd.to_numeric(observations["value"], errors="coerce")
+    valeurs.index = pd.to_datetime(observations["date"])
+    return valeurs.dropna()
+
+
+def taux_directeur():
+    """Taux cible unique jusqu'au 15/12/2008, puis borne haute de la fourchette."""
+    ancien = serie_fred("DFEDTAR", fin="2008-12-15")
+    nouveau = serie_fred("DFEDTARU", debut="2008-12-16")
+    return pd.concat([ancien, nouveau])
+
+
+def variation(date, taux):
+    """Variation du taux entre la veille et le lendemain de l'annonce."""
+    taux_avant = taux.asof(date - UN_JOUR)
+    taux_apres = taux.asof(date + UN_JOUR)
+    return round(taux_apres - taux_avant, 2)
