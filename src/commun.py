@@ -55,10 +55,13 @@ def etude_evenement(vol, dates, lendemain=False, avant=5, apres=5):
     exclus = np.unique(np.concatenate([pos - 1, pos, pos + 1]))
     temoins = vol.drop(vol.index[exclus])
 
+    moyenne_jour = temoins.groupby(temoins.index.dayofweek).mean()
+    ecart_temoins = temoins - temoins.index.dayofweek.map(moyenne_jour).to_numpy()
+
     lignes = []
     for jour in range(-avant, apres + 1):
         obs = vol.iloc[pos + jour]
-        ref = temoins[temoins.index.dayofweek.isin(obs.index.dayofweek)]
-        lignes.append({"jour": jour, "ratio": np.exp(obs.mean() - ref.mean()),
-                       "p_value": mannwhitneyu(obs, ref).pvalue, "n": len(obs)})
+        ecart = obs - obs.index.dayofweek.map(moyenne_jour).to_numpy()
+        lignes.append({"jour": jour, "ratio": np.exp(ecart.mean()),
+                       "p_value": mannwhitneyu(ecart, ecart_temoins).pvalue, "n": len(obs)})
     return pd.DataFrame(lignes)
