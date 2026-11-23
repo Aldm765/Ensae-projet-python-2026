@@ -323,3 +323,28 @@ def figure(resultats=None):
     ax.set_title("Volatilité autour des décisions de la Fed (2000-2025)")
     ax.legend()
     return fig
+
+
+def analyse_urgences():
+    """Même étude d'événement, mais sur les décisions d'urgence (7 dates).
+
+    Les urgences sont souvent annoncées le matin à New York : le S&P 500 et le
+    CAC 40 réagissent le jour même, le Nikkei (déjà fermé) le lendemain.
+    """
+    annonces = charger_annonces()
+    dates_urgences = annonces[annonces["type"] == "urgence"]["date"]
+    reaction_urgence = {"SP500": False, "CAC40": False, "NIKKEI": True}
+
+    resultats = []
+    for marche in reaction_urgence:
+        lendemain = reaction_urgence[marche]
+        prix = charger_prix(marche)
+        vol = volatilite_anormale(prix)
+        res = etude_evenement(vol, dates_urgences, lendemain=lendemain)
+        res["banque"] = "Fed"
+        res["marche"] = marche
+        resultats.append(res)
+
+    tableau = pd.concat(resultats, ignore_index=True)
+    tableau = tableau[["banque", "marche", "jour", "ratio", "p_value", "n"]]
+    return tableau
