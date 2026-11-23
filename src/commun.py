@@ -36,9 +36,17 @@ def charger_prix(marche, telecharger=False):
 
 def volatilite_anormale(prix, fenetre=20):
     """Log de Parkinson du jour moins sa moyenne sur les séances précédentes."""
-    ecart = np.log(prix["high"] / prix["low"]).where(prix["high"] > prix["low"])
-    log_vol = np.log(np.sqrt(ecart**2 / (4 * np.log(2))))
-    return (log_vol - log_vol.shift(1).rolling(fenetre, min_periods=15).mean()).dropna()
+    # Amplitude de la séance, sans les séances où plus haut = plus bas
+    amplitude = np.log(prix["high"] / prix["low"])
+    amplitude = amplitude.where(prix["high"] > prix["low"])
+
+    # Volatilité de Parkinson, puis passage au logarithme
+    parkinson = np.sqrt(amplitude ** 2 / (4 * np.log(2)))
+    log_vol = np.log(parkinson)
+
+    # shift(1) : la moyenne ne contient pas le jour étudié
+    moyenne_passee = log_vol.shift(1).rolling(fenetre, min_periods=15).mean()
+    return (log_vol - moyenne_passee).dropna()
 
 
 def etude_evenement(vol, dates, lendemain=False, avant=5, apres=5):
@@ -49,19 +57,33 @@ def etude_evenement(vol, dates, lendemain=False, avant=5, apres=5):
     mêmes jours de la semaine, hors annonce à une séance près.
     Renvoie une ligne par jour : jour, ratio, p_value, n.
     """
+    # 1. Position de la séance de réaction de chaque annonce
     cote = "right" if lendemain else "left"
-    pos = vol.index.searchsorted(pd.DatetimeIndex(dates), side=cote)
-    pos = np.unique(pos[(pos >= avant) & (pos < len(vol) - apres)])
-    exclus = np.unique(np.concatenate([pos - 1, pos, pos + 1]))
-    temoins = vol.drop(vol.index[exclus])
+    positions = set()
+    for date in pd.DatetimeIndex(dates):
+        position = vol.index.searchsorted(date, side=cote)
+        if position >= avant and position < len(vol) - apres:
+            positions.add(position)
+    positions = sorted(positions)
 
+    # 2. Jours témoins : toutes les séances sauf les annonces et leurs voisines
+    exclus = set()
+    for position in positions:
+        exclus.update([position - 1, position, position + 1])
+    temoins = vol.drop(vol.index[sorted(exclus)])
+
+    # 3. Volatilité normale de chaque jour de la semaine (0 = lundi)
     moyenne_jour = temoins.groupby(temoins.index.dayofweek).mean()
     ecart_temoins = temoins - temoins.index.dayofweek.map(moyenne_jour).to_numpy()
 
+    # 4. Écart des annonces à cette normale, de J-5 à J+5
     lignes = []
     for jour in range(-avant, apres + 1):
-        obs = vol.iloc[pos + jour]
+        seances = [position + jour for position in positions]
+        obs = vol.iloc[seances]
         ecart = obs - obs.index.dayofweek.map(moyenne_jour).to_numpy()
-        lignes.append({"jour": jour, "ratio": np.exp(ecart.mean()),
-                       "p_value": mannwhitneyu(ecart, ecart_temoins).pvalue, "n": len(obs)})
+        lignes.append({"jour": jour,
+                       "ratio": np.exp(ecart.mean()),
+                       "p_value": mannwhitneyu(ecart, ecart_temoins).pvalue,
+                       "n": len(obs)})
     return pd.DataFrame(lignes)
