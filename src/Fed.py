@@ -10,8 +10,10 @@ from pathlib import Path
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import os 
+import os
 from dotenv import find_dotenv, load_dotenv
+import matplotlib.pyplot as plt
+from src.commun import charger_prix, etude_evenement, volatilite_anormale
 
 # Chemins et adresses
 RACINE = Path(__file__).resolve().parents[1]
@@ -219,3 +221,105 @@ def variation(date, taux):
     taux_avant = taux.asof(date - UN_JOUR)
     taux_apres = taux.asof(date + UN_JOUR)
     return round(taux_apres - taux_avant, 2)
+
+
+def date_changement(date, taux, fenetre=2):
+    """Pour une urgence : premier jour (dans les 2 jours) où le taux change.
+
+    Renvoie (jour, variation), ou None si le taux n'a pas bougé.
+    """
+    taux_avant = taux.asof(date - UN_JOUR)
+    for k in range(fenetre + 1):
+        jour = date + k * UN_JOUR
+        taux_du_jour = taux.asof(jour)
+        if taux_du_jour != taux_avant:
+            return jour, round(taux_du_jour - taux_avant, 2)
+    return None
+
+
+def construire_annonces():
+    """Refait toute la collecte et réécrit data/annonces_fed.csv (environ 1 minute)."""
+    archives = dates_fomc_archives()
+    recentes = dates_fomc_recentes()
+    toutes = pd.concat([archives, recentes], ignore_index=True)
+    toutes = retirer_doublons(toutes)
+    taux = taux_directeur()
+
+    # Réunions prévues : on calcule la variation du taux
+    prevues = toutes[toutes["type"] == "prevue"].copy()
+    variations = []
+    for date in prevues["date"]:
+        variations.append(variation(date, taux))
+    prevues["variation_taux"] = variations
+
+    # Urgences : on ne garde que celles où le taux a vraiment changé,
+    # et on les date au jour du changement
+    lignes_urgences = []
+    urgences = toutes[toutes["type"] == "urgence"]
+    for _, urgence in urgences.iterrows():
+        resultat = date_changement(urgence["date"], taux)
+        if resultat is None:
+            continue
+        jour, var = resultat
+        ligne = urgence.to_dict()
+        ligne["date"] = jour
+        ligne["variation_taux"] = var
+        lignes_urgences.append(ligne)
+    urgences_gardees = pd.DataFrame(lignes_urgences)
+
+    annonces = pd.concat([prevues, urgences_gardees], ignore_index=True)
+    annonces = annonces.sort_values("date")
+    annonces = annonces.reset_index(drop=True)
+    annonces["date"] = annonces["date"].dt.date
+    annonces.to_csv(FICHIER, index=False)
+    return annonces
+
+
+# ---------- 3. Analyse ----------
+
+def charger_annonces():
+    """Lit data/annonces_fed.csv (versionné dans le dépôt, donc toujours disponible)."""
+    annonces = pd.read_csv(FICHIER, parse_dates=["date"])
+    return annonces
+
+
+def analyse():
+    """Étude d'événement autour des réunions prévues de la Fed, sur les trois marchés.
+
+    Renvoie un tableau avec les colonnes : banque, marche, jour, ratio, p_value, n.
+    """
+    annonces = charger_annonces()
+    dates_prevues = annonces[annonces["type"] == "prevue"]["date"]
+
+    resultats = []
+    for marche in REACTION:
+        lendemain = REACTION[marche]
+        prix = charger_prix(marche)
+        vol = volatilite_anormale(prix)
+        res = etude_evenement(vol, dates_prevues, lendemain=lendemain)
+        res["banque"] = "Fed"
+        res["marche"] = marche
+        resultats.append(res)
+
+    tableau = pd.concat(resultats, ignore_index=True)
+    tableau = tableau[["banque", "marche", "jour", "ratio", "p_value", "n"]]
+    return tableau
+
+
+def figure(resultats=None):
+    """Graphique de la volatilité de J-5 à J+5 autour des décisions de la Fed."""
+    if resultats is None:
+        resultats = analyse()
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    for marche in REACTION:
+        donnees = resultats[resultats["marche"] == marche]
+        ax.plot(donnees["jour"], donnees["ratio"], marker="o", label=marche)
+
+    ax.axhline(1, color="grey", linestyle="--")   # niveau d'un jour normal
+    ax.axvline(0, color="grey", linestyle=":")    # jour de réaction
+    ax.set_xlabel("Jours par rapport au jour de réaction")
+    ax.set_ylabel("Volatilité / jours témoins")
+    ax.set_title("Volatilité autour des décisions de la Fed (2000-2025)")
+    ax.legend()
+    return fig
