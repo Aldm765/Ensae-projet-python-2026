@@ -59,6 +59,14 @@ def analyser_decalage_horaire(donnees):
     return pd.DataFrame(lignes).set_index("marche_cible")
 
 
+def erreur_robuste(x, y, regression):
+    """Écart-type de la pente, robuste à l'hétéroscédasticité (White, HC1)."""
+    residus = y - regression.intercept - regression.slope * x
+    ecart = x - x.mean()
+    n = len(x)
+    return np.sqrt(n / (n - 2) * (ecart ** 2 * residus ** 2).sum()) / (ecart ** 2).sum()
+
+
 def tester_asymetrie_transmission(donnees):
     """Teste si les baisses du S&P 500 (t) se transmettent plus fort à t+1 que les hausses."""
     r_close, _ = preparer_rendements(donnees)
@@ -73,9 +81,11 @@ def tester_asymetrie_transmission(donnees):
         reg_b = stats.linregress(baisses["sp"], baisses["y"])
         reg_h = stats.linregress(hausses["sp"], hausses["y"])
 
-        # Test de différence des pentes (statistique de Student)
+        # Test de différence des pentes, avec des erreurs robustes
         diff_beta = reg_b.slope - reg_h.slope
-        se_diff = np.sqrt(reg_b.stderr ** 2 + reg_h.stderr ** 2)
+        se_b = erreur_robuste(baisses["sp"], baisses["y"], reg_b)
+        se_h = erreur_robuste(hausses["sp"], hausses["y"], reg_h)
+        se_diff = np.sqrt(se_b ** 2 + se_h ** 2)
         t_stat = diff_beta / se_diff
         ddl = len(df) - 4
         p_val_diff = 2 * (1 - stats.t.cdf(abs(t_stat), df=ddl))
@@ -162,7 +172,7 @@ def tracer_transmission_et_forbes_rigobon(donnees):
     ax1.axvline(0, color="grey", linewidth=0.7, linestyle="--")
     ax1.set_xlabel("Rendement S&P 500 jour t (%)")
     ax1.set_ylabel("Rendement Nikkei 225 jour t+1 (%)")
-    ax1.set_title("Transmission décalée et asymétrique (New York -> Tokyo)")
+    ax1.set_title("Transmission décalée (New York -> Tokyo)")
     ax1.legend(loc="upper left", fontsize=8.5)
     ax1.grid(True, alpha=0.3)
 

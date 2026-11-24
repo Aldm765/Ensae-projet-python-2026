@@ -17,3 +17,7 @@ data/*
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# Exception : les prix bruts, pour que le rapport tourne sans Yahoo
+!data/raw/
+!data/raw/*.csv

@@ -32,6 +32,12 @@ REACTION = {"SP500": False, "CAC40": True, "NIKKEI": True}
 
 UN_JOUR = pd.Timedelta(days=1)
 
+# FRED date les urgences de mars 2020 à leur entrée en vigueur : on garde le jour de l'annonce.
+DATES_ANNONCE = {pd.Timestamp("2020-03-04"): pd.Timestamp("2020-03-03"),
+                 pd.Timestamp("2020-03-16"): pd.Timestamp("2020-03-15")}
+
+# Le 3 janvier 2001, la Fed annonce vers 19h (Paris) : le CAC 40 ne réagit que le 4.
+REPORT_CAC = {pd.Timestamp("2001-01-03"): pd.Timestamp("2001-01-04")}
 
 # ---------- 1. Collecte des dates ----------
 
@@ -262,7 +268,7 @@ def construire_annonces():
             continue
         jour, var = resultat
         ligne = urgence.to_dict()
-        ligne["date"] = jour
+        ligne["date"] = DATES_ANNONCE.get(jour, jour)
         ligne["variation_taux"] = var
         lignes_urgences.append(ligne)
     urgences_gardees = pd.DataFrame(lignes_urgences)
@@ -340,7 +346,8 @@ def analyse_urgences():
         lendemain = reaction_urgence[marche]
         prix = charger_prix(marche)
         vol = volatilite_anormale(prix)
-        res = etude_evenement(vol, dates_urgences, lendemain=lendemain)
+        dates = dates_urgences.replace(REPORT_CAC) if marche == "CAC40" else dates_urgences
+        res = etude_evenement(vol, dates, lendemain=lendemain)
         res["banque"] = "Fed"
         res["marche"] = marche
         resultats.append(res)

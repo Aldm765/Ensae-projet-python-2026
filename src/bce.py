@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from matplotlib.lines import Line2D
 from scipy.stats import mannwhitneyu
 
 from src.commun import charger_prix, etude_evenement, volatilite_anormale
@@ -37,6 +36,8 @@ NOMS = {"CAC40": "CAC 40", "SP500": "S&P 500", "NIKKEI": "Nikkei (séance suivan
 SEUIL = 0.05
 BLEU, GRIS, TEXTE = "#2a78d6", "#b5b4ad", "#52514e"
 
+
+# ---------- 1. Collecte des décisions ----------
 
 def scraper_annee(annee):
     """Renvoie les communiqués de politique monétaire d'une année : date, titre."""
@@ -95,14 +96,19 @@ def ajouter_variation(decisions, taux):
     somme ferait disparaître la baisse d'urgence.
     """
     variations = taux.diff().dropna()
-    variations = variations[(variations != 0) & (variations.index >= decisions["date"].min())]
+    variations = variations[variations != 0]
 
-    position = decisions["date"].searchsorted(variations.index, side="right") - 1
-    changements = pd.DataFrame({"date": decisions["date"].to_numpy()[position],
-                                "variation_taux": variations.to_numpy()})
-    changements = changements.drop_duplicates("date", keep="first")
+    variation_par_decision = {}
+    for date_effet, variation in variations.items():
+        decisions_avant = decisions[decisions["date"] <= date_effet]
+        if decisions_avant.empty:
+            continue
+        derniere_decision = decisions_avant["date"].max()
+        if derniere_decision not in variation_par_decision:
+            variation_par_decision[derniere_decision] = variation
 
-    resultat = decisions.merge(changements, on="date", how="left")
+    resultat = decisions.copy()
+    resultat["variation_taux"] = resultat["date"].map(variation_par_decision)
     resultat["variation_taux"] = resultat["variation_taux"].fillna(0).round(2)
     return resultat
 
@@ -134,6 +140,8 @@ def charger_annonces(telecharger=False):
     return construire_annonces()
 
 
+# ---------- 2. Analyse et figure ----------
+
 def analyse():
     """Renvoie l'effet des décisions : banque, marche, jour, ratio, p_value, n."""
     dates = charger_annonces()["date"]
@@ -142,10 +150,12 @@ def analyse():
     for marche, lendemain in MARCHES_BCE.items():
         vol = volatilite_anormale(charger_prix(marche))
         effet = etude_evenement(vol, dates, lendemain=lendemain)
-        resultats.append(effet.assign(banque="BCE", marche=marche))
+        effet["banque"] = "BCE"
+        effet["marche"] = marche
+        resultats.append(effet)
 
-    colonnes = ["banque", "marche", "jour", "ratio", "p_value", "n"]
-    return pd.concat(resultats, ignore_index=True)[colonnes]
+    tableau = pd.concat(resultats, ignore_index=True)
+    return tableau[["banque", "marche", "jour", "ratio", "p_value", "n"]]
 
 
 def figure(resultats=None):
@@ -156,48 +166,59 @@ def figure(resultats=None):
     fig, axes = plt.subplots(1, len(MARCHES_BCE), figsize=(11, 4), sharey=True)
     for ax, marche in zip(axes, MARCHES_BCE):
         effet = resultats[resultats["marche"] == marche]
-        significatif = effet["p_value"] < SEUIL
+        significatif = effet[effet["p_value"] < SEUIL]
+        non_significatif = effet[effet["p_value"] >= SEUIL]
 
         ax.axhline(1, color=GRIS, linewidth=1)
         ax.axvline(0, color=GRIS, linewidth=1, linestyle=":")
-        ax.plot(effet["jour"], effet["ratio"], color=BLEU, linewidth=2, zorder=2)
-        ax.scatter(effet.loc[significatif, "jour"], effet.loc[significatif, "ratio"],
-                   s=48, color=BLEU, edgecolor="white", linewidth=1.5, zorder=3)
-        ax.scatter(effet.loc[~significatif, "jour"], effet.loc[~significatif, "ratio"],
-                   s=42, facecolor="white", edgecolor=BLEU, linewidth=1.5, zorder=3)
+        ax.plot(effet["jour"], effet["ratio"], color=BLEU, linewidth=2)
+        ax.scatter(significatif["jour"], significatif["ratio"], s=48, color=BLEU,
+                   label="p < 5 %", zorder=3)
+        ax.scatter(non_significatif["jour"], non_significatif["ratio"], s=42,
+                   facecolor="white", edgecolor=BLEU, label="non significatif", zorder=3)
 
         ax.set_title(NOMS[marche], loc="left", fontsize=11, color=TEXTE)
         ax.set_xlabel("Séances autour de la décision", color=TEXTE)
         ax.set_xticks(range(-5, 6))
-        ax.yaxis.set_major_formatter(lambda valeur, _: f"{valeur:.2f}".replace(".", ","))
-        ax.tick_params(colors=TEXTE, length=0)
-        ax.spines[["top", "right", "left"]].set_visible(False)
-        ax.spines["bottom"].set_color(GRIS)
+        ax.spines[["top", "right"]].set_visible(False)
 
     axes[0].set_ylabel("Volatilité / jours témoins", color=TEXTE)
-    fig.suptitle("Volatilité autour des décisions de la BCE, 2000-2025 (1,00 = aucun effet)",
+    axes[0].legend(frameon=False, loc="upper right")
+    fig.suptitle("Volatilité autour des décisions de la BCE, 2000-2025 (1 = aucun effet)",
                  x=0.01, ha="left", fontsize=13)
-    legende = [Line2D([], [], marker="o", linestyle="", color=BLEU, label="p < 5 %"),
-               Line2D([], [], marker="o", linestyle="", markerfacecolor="white",
-                      markeredgecolor=BLEU, label="non significatif")]
-    fig.legend(handles=legende, loc="upper right", ncol=2, frameon=False)
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.tight_layout()
     return fig
 
+
+# ---------- 3. Contrôles ----------
 
 def seances_reaction(vol, dates, lendemain):
     """Renvoie la séance où le marché réagit à chaque date, sans doublon."""
     cote = "right" if lendemain else "left"
-    position = vol.index.searchsorted(pd.DatetimeIndex(dates), side=cote)
-    return vol.index[np.unique(position)]
+    positions = set()
+    for date in pd.DatetimeIndex(dates):
+        positions.add(vol.index.searchsorted(date, side=cote))
+    return vol.index[sorted(positions)]
 
 
 def retirer_autres(vol, seances, autres):
     """Retire de vol les autres décisions et leurs voisines, pour des témoins propres."""
-    position = vol.index.get_indexer(autres)
-    voisins = np.unique(np.concatenate([position - 1, position, position + 1]))
-    voisins = voisins[(voisins >= 0) & (voisins < len(vol))]
-    return vol.drop(vol.index[voisins].difference(seances))
+    a_retirer = set()
+    for date in autres:
+        position = vol.index.get_loc(date)
+        for voisin in [position - 1, position, position + 1]:
+            if 0 <= voisin < len(vol):
+                a_retirer.add(vol.index[voisin])
+
+    # On garde les séances étudiées, même si elles sont voisines d'une autre décision
+    a_retirer = a_retirer - set(seances)
+    return vol.drop(list(a_retirer))
+
+
+def effet_jour_0(vol, dates, lendemain=False):
+    """Renvoie la ligne du jour 0 de l'étude d'événement."""
+    effet = etude_evenement(vol, dates, lendemain=lendemain)
+    return effet[effet["jour"] == 0].iloc[0]
 
 
 def controle_changement():
@@ -207,20 +228,21 @@ def controle_changement():
     significatif dans un groupe et pas dans l'autre ne suffit pas à la prouver.
     """
     annonces = charger_annonces()
-    a_change = (annonces["variation_taux"].ne(0)
-                | annonces["date"].isin(pd.to_datetime(TAUX_PRINCIPAL_SEUL)))
+    taux_depot_change = annonces["variation_taux"] != 0
+    taux_principal_change = annonces["date"].isin(pd.to_datetime(TAUX_PRINCIPAL_SEUL))
+    a_change = taux_depot_change | taux_principal_change
 
     lignes = []
     for marche, lendemain in MARCHES_BCE.items():
         vol = volatilite_anormale(charger_prix(marche))
         avec = seances_reaction(vol, annonces.loc[a_change, "date"], lendemain)
-        sans = seances_reaction(vol, annonces.loc[~a_change, "date"], lendemain).difference(avec)
+        sans = seances_reaction(vol, annonces.loc[~a_change, "date"], lendemain)
+        sans = sans.difference(avec)
         p_ecart = mannwhitneyu(vol.loc[avec], vol.loc[sans]).pvalue
 
-        for groupe, seances, autres in [("avec changement", avec, sans),
-                                        ("sans changement", sans, avec)]:
-            effet = etude_evenement(retirer_autres(vol, seances, autres), seances)
-            jour_0 = effet[effet["jour"] == 0].iloc[0]
+        groupes = [("avec changement", avec, sans), ("sans changement", sans, avec)]
+        for groupe, seances, autres in groupes:
+            jour_0 = effet_jour_0(retirer_autres(vol, seances, autres), seances)
             lignes.append({"banque": "BCE", "marche": marche, "groupe": groupe,
                            "ratio": jour_0["ratio"], "p_value": jour_0["p_value"],
                            "n": int(jour_0["n"]), "p_ecart": p_ecart})
@@ -240,8 +262,7 @@ def controle_2002():
         vol = volatilite_anormale(charger_prix(marche))
         seances = seances_reaction(vol, gardees, lendemain)
         autres = seances_reaction(vol, annonces["date"], lendemain).difference(seances)
-        effet = etude_evenement(retirer_autres(vol, seances, autres), seances)
-        jour_0 = effet[effet["jour"] == 0].iloc[0]
+        jour_0 = effet_jour_0(retirer_autres(vol, seances, autres), seances)
         lignes.append({"banque": "BCE", "marche": marche, "ratio": jour_0["ratio"],
                        "p_value": jour_0["p_value"], "n": int(jour_0["n"])})
     return pd.DataFrame(lignes)
@@ -254,9 +275,12 @@ def volatilite_garman_klass(prix, fenetre=20):
     """
     amplitude = np.log(prix["high"] / prix["low"])
     rendement = np.log(prix["close"] / prix["open"])
-    variance = 0.5 * amplitude**2 - (2 * np.log(2) - 1) * rendement**2
-    log_vol = np.log(np.sqrt(variance.where(variance > 0)))
-    return (log_vol - log_vol.shift(1).rolling(fenetre, min_periods=15).mean()).dropna()
+    variance = 0.5 * amplitude ** 2 - (2 * np.log(2) - 1) * rendement ** 2
+    variance = variance.where(variance > 0)
+
+    log_vol = np.log(np.sqrt(variance))
+    moyenne_passee = log_vol.shift(1).rolling(fenetre, min_periods=15).mean()
+    return (log_vol - moyenne_passee).dropna()
 
 
 def controle_garman_klass():
@@ -266,8 +290,7 @@ def controle_garman_klass():
     lignes = []
     for marche, lendemain in MARCHES_BCE.items():
         vol = volatilite_garman_klass(charger_prix(marche))
-        effet = etude_evenement(vol, dates, lendemain=lendemain)
-        jour_0 = effet[effet["jour"] == 0].iloc[0]
+        jour_0 = effet_jour_0(vol, dates, lendemain=lendemain)
         lignes.append({"banque": "BCE", "marche": marche, "ratio": jour_0["ratio"],
                        "p_value": jour_0["p_value"], "n": int(jour_0["n"])})
     return pd.DataFrame(lignes)
