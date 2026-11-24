@@ -4,51 +4,52 @@ Projet réalisé dans le cadre du cours *Python pour la data science* (ENSAE, 20
 
 ## Problématique
 
-Les annonces de politique monétaire de la Réserve fédérale américaine (Fed) et de la
-Banque centrale européenne (BCE) font-elles monter la volatilité boursière ? Et si oui,
-ce choc se transmet-il aux autres marchés : actions étrangères, taux obligataires, change ?
+Quand la Réserve fédérale américaine (Fed) ou la Banque centrale européenne (BCE) annoncent une décision de taux, la volatilité boursière monte-t-elle, et ce choc se transmet-il aux autres places financières ? Nous traitons trois questions :
 
-Nous comparons la volatilité des marchés autour des jours d'annonce à celle des jours
-ordinaires, puis nous regardons si un choc né sur un marché (ex. annonce de la Fed sur
-les actions américaines) se propage aux autres (actions européennes et asiatiques,
-taux, euro-dollar).
+1. **Effet local** : la volatilité d'un marché monte-t-elle autour des décisions de sa banque centrale, par rapport à des jours témoins ?
+2. **Transmission** : le choc passe-t-il à l'Europe, à l'Asie ou aux États-Unis, et avec quel décalage ?
+3. **Asymétrie** : la Fed pèse-t-elle plus sur l'Europe que la BCE sur les États-Unis ?
+
+Marchés étudiés : S&P 500, CAC 40, Nikkei 225 et VIX, de 2000 à 2025.
 
 ## Données
 
-| Source | Contenu | Méthode d'accès |
+| Source | Contenu | Accès |
 |---|---|---|
-| Site de la Fed (federalreserve.gov) | Dates des réunions et annonces du FOMC | Scraping |
-| Site de la BCE (ecb.europa.eu) | Dates des décisions de politique monétaire | Scraping |
-| ECB Data Portal | Taux directeurs de la BCE | API |
-| FRED (Fed de Saint-Louis) | Taux directeur de la Fed, VIX, taux à 10 ans américains, EUR/USD | API (clé gratuite) |
-| Yahoo Finance (package `yfinance`) | Cours quotidiens : S&P 500, Euro Stoxx 50, CAC 40, Nikkei 225, VIX | API non officielle |
+| Yahoo Finance (`yfinance`) | Prix quotidiens (ouverture, plus haut, plus bas, clôture) des 4 indices | API non officielle |
+| Site de la Fed | Dates des réunions du FOMC | Scraping |
+| Site de la BCE | Dates des décisions de politique monétaire | Scraping |
+| FRED (Fed de Saint-Louis) | Taux directeur de la Fed | API (clé gratuite) |
+| ECB Data Portal | Taux de dépôt de la BCE | API |
 
-Les données ne sont pas stockées dans ce dépôt : elles sont téléchargées par le code.
-Une copie des données brutes est conservée sur l'espace de stockage S3 du SSP Cloud,
-et le petit tableau des dates d'annonce (`data/annonces.csv`) est versionné ici,
-afin que le projet reste reproductible même si une source change.
+Les prix (`data/raw/`) et les calendriers d'annonces (`data/annonces_fed.csv`, `data/annonces_bce.csv`) sont versionnés dans le dépôt : le rapport s'exécute sans accès à Internet et ne dépend pas de la disponibilité des sites.
 
-**Limites connues :** le scraping dépend de la structure des sites, qui peut changer ;
-`yfinance` n'est pas une API officielle.
+**Limites connues :** le scraping dépend de la structure des sites, qui peut changer ; `yfinance` n'est pas une API officielle.
 
 ## Structure du dépôt
 
 ```
-├── README.md            # ce fichier
-├── requirements.txt     # packages Python nécessaires
-├── rapport.ipynb        # rapport final
+├── README.md
+├── requirements.txt       # versions figées des packages
+├── rapport.ipynb          # le rapport final
 ├── data/
-│   └── annonces.csv     # dates des annonces Fed et BCE (copie de secours)
-└── src/
-    ├── collecte.py      # cours des marchés (yfinance, FRED)
-    ├── nettoyage.py     # rendements et volatilité
-    ├── fed.py           # annonces de la Fed et effet sur les marchés américains
-    ├── bce.py           # annonces de la BCE et effet sur les marchés européens
-    ├── transmission.py  # transmission du choc entre marchés
-    └── visualisation.py # fonctions graphiques communes
+│   ├── annonces_fed.csv   # 214 décisions de la Fed (207 prévues, 7 urgences)
+│   ├── annonces_bce.csv   # 293 décisions de la BCE
+│   └── raw/               # prix quotidiens : SP500, CAC40, NIKKEI, VIX
+├── src/
+│   ├── commun.py          # chargement des prix, volatilité anormale, étude d'événement
+│   ├── marches.py         # statistiques descriptives et graphiques des marchés
+│   ├── transmission.py    # corrélations décalées, correction de Forbes et Rigobon
+│   ├── fed.py             # dates de la Fed et effet sur les marchés
+│   ├── bce.py             # dates de la BCE, effet sur les marchés et contrôles
+│   └── comparaison.py     # asymétrie Fed/BCE et contrôle des réunions proches
+├── textes/                # textes du rapport, une partie par fichier
+└── brouillons/            # notebooks d'exploration, un par partie
 ```
 
 ## Reproduire le projet
+
+Il faut **Python 3.12 ou plus**, exigé par la version de `numpy` figée dans `requirements.txt`.
 
 Sur le SSP Cloud (service VSCode-python) :
 
@@ -58,23 +59,20 @@ cd Ensae-projet-python-2026
 pip install -r requirements.txt
 ```
 
-Créer un fichier `.env` à la racine contenant votre clé FRED (gratuite sur
-fred.stlouisfed.org) :
+Puis ouvrir `rapport.ipynb` et lancer **Restart**, puis **Run All**. Aucune clé d'API n'est nécessaire, car le rapport lit les données versionnées.
 
-```
-FRED_API_KEY=Votre clé 
-```
+Pour refaire la collecte complète (optionnel) :
 
-Puis exécuter `rapport.ipynb` de la première à la dernière cellule.
+- dates de la BCE : `bce.construire_annonces()` ;
+- dates de la Fed : `fed.construire_annonces()`, qui demande une clé FRED dans un fichier `.env` à la racine (`FRED_API_KEY=votre_clé`, gratuite sur fred.stlouisfed.org). Ce fichier n'est jamais publié ;
+- prix : `charger_prix(marche, telecharger=True)` dans `src/commun.py`.
 
 ## Utilisation de l'IA
 
-Un assistant IA a été utilisé pour expliquer les concepts (Git, API, scraping)
-et aider à écrire le code. Chaque fonction a été relue, testée et comprise
-par l'équipe.
+Un assistant IA a été utilisé pour expliquer les concepts (Git, API, scraping), relire le code et aider à l'écrire. Chaque fonction a été relue, testée et comprise par l'équipe.
 
 ## Auteurs
 
 - Alexandre Lim de Montgolfier
 - Romain Mirat
-- Albéric Pungier 
+- Albéric Pungier
